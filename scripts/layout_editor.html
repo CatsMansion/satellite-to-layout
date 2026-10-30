@@ -1,0 +1,1108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>场地布局编辑器 · satellite-to-layout</title>
+<style>
+  :root{
+    --bg:#f4f2ee; --panel:#fbfaf7; --line:#d9d4cb; --ink:#1e1c19; --sub:#6d675e;
+    --accent:#2f6f4f; --accent2:#b4552f; --sel:#1a73c8;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:13px/1.45 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;overflow:hidden}
+  #app{display:flex;flex-direction:column;height:100%}
+  header{display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header .ttl{font-weight:700;margin-right:10px;letter-spacing:.02em}
+  .tool{display:flex;gap:2px;background:#efede8;border:1px solid var(--line);border-radius:7px;padding:2px}
+  .tool button{border:0;background:transparent;padding:5px 10px;border-radius:5px;cursor:pointer;
+    font:inherit;color:var(--sub)}
+  .tool button:hover{background:#e3e0d8}
+  .tool button.on{background:var(--accent);color:#fff}
+  .sp{flex:1}
+  header button.act{border:1px solid var(--line);background:#fff;padding:5px 11px;border-radius:6px;
+    cursor:pointer;font:inherit}
+  header button.act:hover{border-color:var(--accent);color:var(--accent)}
+  main{flex:1;display:flex;min-height:0}
+  #wrap{flex:1;position:relative;min-width:0}
+  canvas{display:block;width:100%;height:100%;cursor:crosshair}
+  aside{width:268px;background:var(--panel);border-left:1px solid var(--line);
+    display:flex;flex-direction:column;min-height:0}
+  aside h3{margin:0;padding:9px 12px;font-size:12px;font-weight:700;color:var(--sub);
+    border-bottom:1px solid var(--line);letter-spacing:.04em}
+  #insp{padding:10px 12px;overflow:auto;flex:1}
+  #insp .empty{color:var(--sub);font-size:12px;line-height:1.7}
+  .row{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+  .row label{width:74px;color:var(--sub);font-size:12px;flex:none}
+  .row input,.row select{flex:1;min-width:0;padding:4px 6px;border:1px solid var(--line);
+    border-radius:5px;font:inherit;background:#fff}
+  .row input[type=range]{padding:0}
+  .tag{display:inline-block;padding:1px 7px;border-radius:99px;font-size:11px;
+    background:#e7efe9;color:var(--accent);margin-bottom:8px}
+  .del{margin-top:10px;width:100%;padding:6px;border:1px solid #e0c9c1;background:#fdf3f0;
+    color:var(--accent2);border-radius:6px;cursor:pointer;font:inherit}
+  footer{display:flex;align-items:center;gap:14px;padding:6px 12px;background:var(--panel);
+    border-top:1px solid var(--line);color:var(--sub);font-size:12px}
+  footer b{color:var(--ink);font-weight:600}
+  .dot{width:8px;height:8px;border-radius:99px;display:inline-block;margin-right:5px;vertical-align:1px}
+  #toast{position:absolute;left:50%;top:14px;transform:translateX(-50%);background:#1e1c19;color:#fff;
+    padding:7px 14px;border-radius:7px;font-size:12px;opacity:0;pointer-events:none;transition:opacity .2s}
+  #toast.on{opacity:.94}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <span class="ttl">场地布局编辑</span>
+    <div class="tool" id="tools">
+      <button data-t="select" class="on">选择/移动</button>
+      <button data-t="pole">电线杆</button>
+      <button data-t="lamp">路灯</button>
+      <button data-t="tree">树</button>
+      <button data-t="grass">草丛</button>
+      <button data-t="car">停车</button>
+      <button data-t="band">地块</button>
+    </div>
+    <label style="display:flex;gap:6px;align-items:center;margin-left:8px;color:#6d675e;cursor:pointer"
+           title="勾上则放完一个后工具不自动切回「选择/移动」，可以连着放多个">
+      <input type="checkbox" id="contPick"> 连续放
+    </label>
+    <select id="preset" title="载入一套布局（会覆盖当前未保存的改动）"
+            style="margin-left:10px;padding:4px 8px;border:1px solid #d9d4cb;border-radius:6px;background:#fff;font:inherit;color:#3a352e">
+    </select>
+    <div class="sp"></div>
+    <button class="act" id="fit">适应内容</button>
+    <button class="act" id="fitSite">整场</button>
+    <button class="act" id="undo">撤销</button>
+    <button class="act" id="imp">导入</button>
+    <button class="act" id="exp">导出 JSON</button>
+    <button class="act" id="save" style="border-color:#bcd8c8;background:#eef6f1;color:#2f6f4f">保存到文件</button>
+  </header>
+
+  <main>
+    <div id="wrap">
+      <canvas id="cv"></canvas>
+      <div id="toast"></div>
+    </div>
+    <aside>
+      <h3>属性</h3>
+      <div id="insp"><div class="empty">没选中东西。<br><br>· 拖 = 移动<br>· 滚轮 = 缩放<br>· 右键拖 / 空格拖 = 平移<br>· Del = 删除<br>· 选工具后在地图上点 = 新增</div></div>
+      <h3>图层显隐</h3>
+      <div id="layers" style="padding:10px 12px;display:flex;flex-direction:column;gap:6px"></div>
+    </aside>
+  </main>
+
+  <footer>
+    <span id="st">—</span>
+    <span class="sp" style="flex:1"></span>
+    <span id="cnt"></span>
+  </footer>
+</div>
+
+<input type="file" id="file" accept=".json" style="display:none">
+
+<script>
+"use strict";
+
+/* ============================================================
+   场地常量 —— ⭐ 全部从布局文件里的 building 现算，不再写死某一栋楼。
+
+   老版本（2026-10 之前）这里是硬编码常量：unit/units/build/corr/stair……
+   换一张卫星图就得改代码，等于不能复用。
+   现在 SITE 只是一层**只读视图**，它读 L.building；换布局文件后
+   楼体、户数、房号、外廊、楼梯全部自动跟着变，代码一行不用动。
+
+   布局文件里 building 的写法（全部可选，缺了就用兜底值）：
+     "building": {
+       "box":  {"x0":0, "y0":0, "x1":2912, "y1":540},   // 主体轮廓
+       "corr": {"y0":420, "y1":540},                    // 外廊/前廊那条带（没有就不画）
+       "stair":{"x0":2952,"x1":3302,"y0":420,"y1":510}, // 外挂楼梯（没有就不画）
+       "units": 8,                                      // 开间数（画分隔线 + 房号）
+       "noStart": 201,                                  // 房号从几号开始（从左往右递增）
+       "label": "主楼"                                  // 只是标注
+     }
+   ============================================================ */
+function BL(){
+  const b = (typeof L !== "undefined" && L && L.building) || {};
+  const raw = b.box || {x0:0, y0:0, x1:3000, y1:600};
+  const x0 = Math.min(raw.x0, raw.x1), x1 = Math.max(raw.x0, raw.x1);
+  const y0 = Math.min(raw.y0, raw.y1), y1 = Math.max(raw.y0, raw.y1);
+  const units = Math.max(1, Math.round(Number(b.units) || 1));
+  const c = b.corr;
+  const st = b.stair;
+  return {
+    box:{x0, y0, x1, y1},
+    corr: c ? {y0:Math.min(c.y0,c.y1), y1:Math.max(c.y0,c.y1)} : null,
+    stair: st ? {x0:Math.min(st.x0,st.x1), x1:Math.max(st.x0,st.x1),
+                 y0:Math.min(st.y0,st.y1), y1:Math.max(st.y0,st.y1)} : null,
+    units, unitW:(x1-x0)/units,
+    noStart: Number.isFinite(Number(b.noStart)) ? Number(b.noStart) : 101,
+    label: b.label || "",
+  };
+}
+
+const SITE = {
+  get build(){ return BL().box; },
+  get corr(){ return BL().corr || {y0:BL().box.y1, y1:BL().box.y1}; },
+  get stair(){ return BL().stair || {x0:0, y0:0, x1:0, y1:0}; },
+  get hasStair(){ return !!BL().stair; },
+  get units(){ return BL().units; },
+  get unit(){ return BL().unitW; },
+  get site(){ return contentBox(); },
+  // 人行道 / 路缘：从地块里现找，不再靠常量
+  get walk(){ const w=(L.bands||[]).find(b=>b.kind==="walk"); return w?{y0:w.y0,y1:w.y1}:{y0:0,y1:0}; },
+  get curb(){ const c=(L.bands||[]).find(b=>b.kind==="curb"); return c?{y0:c.y0,y1:c.y1}:{y0:0,y1:0}; },
+};
+
+/* ⭐ 地块（2026-10-30 新增）—— 人行道/路缘/车行道/对面楼 原来是写死在 SITE 里的常量，
+   Ronny 只能看不能改。现在改成布局里的可编辑矩形，能拖、能拉边改宽度、能在属性面板里改数字。
+   ⭐ 2026-10-30 晚：地块从「固定 4 条」放开成「任意多个」——
+     街角地块（David St × Sargood St 那种）用两条车行道拼成 L 形，固定 4 条表达不了。
+     kind 决定材质与渲染高度：road 沥青 / walk 人行道 / curb 路缘 / verge 草地 / lot 场地铺装 / far 对面楼 */
+const BAND_KINDS = {
+  road :{cn:"车行道",  fill:"#b4b1ac", h:2 },
+  walk :{cn:"人行道",  fill:"#e8e3d6", h:14},
+  curb :{cn:"路缘石",  fill:"#cdc6b8", h:18},
+  verge:{cn:"草地",    fill:"#cfe0b0", h:6 },
+  lot  :{cn:"停车场/场地", fill:"#c8c4bb", h:8 },
+  far  :{cn:"对面楼",  fill:"#d9d2c6", h:0 },
+};
+
+const DEFAULT_BANDS = [
+  {kind:"walk", name:"人行道", locked:true, x0:-2000, y0: 540, x1:5312, y1: 790},
+  {kind:"curb", name:"路缘石", locked:true, x0:-2000, y0: 790, x1:5312, y1: 806},
+  {kind:"road", name:"车行道", locked:true, x0:-2000, y0: 806, x1:5312, y1:1900},
+  {kind:"far",  name:"对面楼", locked:true, x0: -300, y0:1900, x1:4200, y1:2700},
+];
+
+/* ============================================================
+   预设：现状 / 街角（按 Ronny 2026-10-30 发的 O'Connor 街角航拍）
+   ============================================================ */
+/* ============================================================
+   预设 —— ⭐ 通用版不再内置某一栋楼。
+
+   现在「换一套方案」= 换一个 json 文件：
+   服务端 /api/list 把目录下所有 *.json 列出来，下拉里直接选；
+   「保存到文件」写回你正在编辑的那一个，不用再手动 cp 来 cp 去。
+   ============================================================ */
+const PRESETS = {};
+let CURRENT_FILE = "layout.json";     // 当前正在编辑的文件名，保存就写这里
+
+/* 树种预设表 —— 只是「名字 → 冠幅/树高/色系」的查表，方便填。
+   ⭐ 通用版：树对象上直接写 {w, h, k} 就能盖过这张表，所以换了树种/换了资产库也不用改代码。
+   w = 冠幅 cm，h = 树高 cm，k = 配色（broad 阔叶绿 / pine 针叶深绿 / red 红枫） */
+const MODELS = {
+  CommonTree_1:{w:431,h:726,k:"broad"}, CommonTree_2:{w:446,h:764,k:"broad"},
+  CommonTree_3:{w:406,h:943,k:"broad"}, CommonTree_4:{w:383,h:944,k:"broad"},
+  CommonTree_5:{w:367,h:701,k:"broad"},
+  Pine_1:{w:494,h:732,k:"pine"}, Pine_2:{w:573,h:738,k:"pine"},
+  Pine_3:{w:361,h:739,k:"pine"}, Pine_4:{w:580,h:1024,k:"pine"},
+  Pine_5:{w:642,h:872,k:"pine"},
+  TwistedTree_1:{w:1352,h:1673,k:"red"}, TwistedTree_2:{w:1056,h:1895,k:"red"},
+  TwistedTree_3:{w:1136,h:1607,k:"red"}, TwistedTree_4:{w:1038,h:1874,k:"red"},
+  TwistedTree_5:{w:949,h:1566,k:"red"},
+};
+const KIND_COLOR = {broad:"#4e8a44", pine:"#2f6b4a", red:"#a8462c"};
+
+/* ============================================================
+   初始布局 —— 与 2026-10-30 18:49 的渲染完全一致
+   ============================================================ */
+const DEFAULT_LAYOUT = {
+  version: 3,
+  // ⭐ 通用版新增：楼体也进布局文件。换一张卫星图只要改这里的数字，不用改代码。
+  building: {
+    box:  {x0:0, y0:0, x1:2912, y1:540},
+    corr: {y0:420, y1:540},
+    stair:{x0:2952, x1:3302, y0:420, y1:510},
+    units: 8, noStart: 201, label: "主楼",
+  },
+  bands: JSON.parse(JSON.stringify(DEFAULT_BANDS)),
+  poles: [{x:353,y:769},{x:993,y:769},{x:1653,y:769}],
+  lamps: [],
+  trees: [
+    {model:"CommonTree_1", x:660,  y:775, scale:0.54, rot:12,  sat:0.72, val:1.18},
+    {model:"CommonTree_5", x:1310, y:775, scale:0.58, rot:143, sat:0.72, val:1.18},
+    {model:"CommonTree_2", x:1980, y:775, scale:0.53, rot:258, sat:0.72, val:1.18},
+    {model:"CommonTree_5", x:2650, y:775, scale:0.56, rot:77,  sat:0.72, val:1.18},
+    {model:"Pine_5",       x:320,  y:-780, scale:0.90, rot:15,  sat:0.78, val:1.04},
+    {model:"Pine_5",       x:1050, y:-1000,scale:1.05, rot:100, sat:0.78, val:1.04},
+    {model:"Pine_5",       x:1780, y:-720, scale:0.84, rot:235, sat:0.78, val:1.04},
+    {model:"Pine_5",       x:2380, y:-1020,scale:0.98, rot:310, sat:0.78, val:1.04},
+    {model:"Pine_5",       x:2760, y:-760, scale:0.80, rot:60,  sat:0.78, val:1.04},
+    {model:"TwistedTree_1",x:-1100,y:-1700,scale:0.52, rot:40,  sat:0.70, val:1.02},
+    {model:"TwistedTree_3",x:-1750,y:-900, scale:0.46, rot:215, sat:0.70, val:1.02},
+    {model:"TwistedTree_2",x:4380, y:-1600,scale:0.50, rot:140, sat:0.70, val:1.02},
+    {model:"TwistedTree_1",x:3700, y:-800, scale:0.44, rot:300, sat:0.70, val:1.02},
+    {model:"TwistedTree_3",x:2300, y:-1900,scale:0.44, rot:95,  sat:0.70, val:1.02},
+  ],
+  grass: [{x0:-2000,y0:-4200,x1:5312,y1:0}],
+  cars : [{x:1500,y:846,len:430},{x:2500,y:846,len:460}],
+};
+
+/* ============================================================
+   状态
+   ============================================================ */
+let L = clone(DEFAULT_LAYOUT);
+let sel = null;                       // {type, i}
+let tool = "select";
+let view = {ox:-400, oy:-2200, k:0.16};
+let drag = null;                      // {mode, ...}
+let hover = null;
+let show = {bands:true, poles:true, lamps:true, trees:true, grass:true, cars:true};
+let hist = [];
+let serverOK = false;
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const insp = document.getElementById("insp");
+const stEl = document.getElementById("st");
+const cntEl = document.getElementById("cnt");
+
+function clone(o){ return JSON.parse(JSON.stringify(o)); }
+function W2S(wx,wy){ return [(wx-view.ox)*view.k, (wy-view.oy)*view.k]; }
+function S2W(sx,sy){ return [sx/view.k+view.ox, sy/view.k+view.oy]; }
+
+/* ============================================================
+   画布
+   ============================================================ */
+function resize(){
+  const r = cv.parentElement.getBoundingClientRect();
+  const d = window.devicePixelRatio||1;
+  cv.width = Math.round(r.width*d); cv.height = Math.round(r.height*d);
+  ctx.setTransform(d,0,0,d,0,0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+function fitTo(box, pad=40){
+  const r = cv.getBoundingClientRect();
+  const w = (box.x1-box.x0)||1, h = (box.y1-box.y0)||1;
+  const k = Math.min((r.width-pad*2)/w, (r.height-pad*2)/h);
+  view.k = Math.max(0.01, Math.min(4, k));
+  view.ox = box.x0 - (r.width/view.k - w)/2;
+  view.oy = box.y0 - (r.height/view.k - h)/2;
+  draw();
+}
+
+// ⭐ 灯的默认 y：贴着人行道内缘。人行道现在是可编辑地块，所以每次现算，别写死常量
+function lampY(){
+  const w = L && L.bands && L.bands.find(b=>b.kind==="walk");
+  if(w) return w.y1 - 30;
+  const c = L && L.bands && L.bands.find(b=>b.kind==="curb");
+  return c ? c.y0 - 30 : 0;
+}
+
+function contentBox(){
+  let b = {x0:1e9,y0:1e9,x1:-1e9,y1:-1e9};
+  // ⛔ 必须挡住非数值：曾因路灯缺 y 字段 → y=NaN → view.oy=NaN → 整张平面图被画到画布外，
+  //    表现是「画布全白只剩网格」，没有任何报错。一个坏字段不能弄瞎整个编辑器。
+  const add=(x,y)=>{
+    if(!Number.isFinite(x) || !Number.isFinite(y)) return;
+    b.x0=Math.min(b.x0,x);b.y0=Math.min(b.y0,y);b.x1=Math.max(b.x1,x);b.y1=Math.max(b.y1,y);
+  };
+  add(SITE.build.x0, SITE.build.y0); add(SITE.build.x1, SITE.build.y1); add(SITE.stair.x1, SITE.stair.y1);
+  L.trees.forEach(t=>add(t.x,t.y)); L.poles.forEach(p=>add(p.x,p.y));
+  L.lamps.forEach(p=>add(p.x,p.y)); L.cars.forEach(c=>{ const f=carFP(c); add(f[0],f[1]); add(f[2],f[3]); });
+  L.grass.forEach(g=>{ add(g.x0,g.y0); add(g.x1,g.y1); });
+  // 地块是全场景的边界，但「适应内容」不该被它们撑到看不出楼 —— 只取 y 范围，x 交给楼
+  if(Array.isArray(L.bands)) L.bands.forEach(bd=>{ add(SITE.build.x0, bd.y0); add(SITE.build.x1, bd.y1); });
+  const m = 200;
+  if(b.x0>b.x1 || b.y0>b.y1) return {x0:-500,y0:-500,x1:3500,y1:2000};   // 兜底，永不返回空框
+  return {x0:b.x0-m, y0:b.y0-m, x1:b.x1+m, y1:b.y1+m};
+}
+
+function rectW(x0,y0,x1,y1){
+  const a = W2S(x0,y0), b = W2S(x1,y1);
+  return [a[0], a[1], b[0]-a[0], b[1]-a[1]];
+}
+
+/* 车位命中/绘制框 —— 两套字段的统一入口。
+   ⛔ 别在外面直接写 c.x+c.len / c.y+160：垂直车位（rot:90）时车长在 y 上，写错就是 NaN 或错框。 */
+function carFP(c){                        // 世界坐标足迹 [x0,y0,x1,y1]
+  const L2 = c.len || 430, W2 = 160;
+  return c.rot ? [c.x, c.y, c.x+W2, c.y+L2] : [c.x, c.y, c.x+L2, c.y+W2];
+}
+function carBox(c){                       // 屏幕矩形
+  const f = carFP(c);
+  return rectW(f[0], f[1], f[2], f[3]);
+}
+
+function draw(){
+  const r = cv.getBoundingClientRect();
+  const W = r.width, H = r.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = "#f7f5f1"; ctx.fillRect(0,0,W,H);
+
+  // ---- 网格 ----
+  const step = view.k > 0.10 ? 100 : (view.k > 0.04 ? 500 : 1000);
+  const [wx0,wy0] = S2W(0,0), [wx1,wy1] = S2W(W,H);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "#e8e4dc";
+  ctx.beginPath();
+  for(let x=Math.floor(wx0/step)*step; x<wx1; x+=step){
+    const sx = W2S(x,0)[0]; ctx.moveTo(sx,0); ctx.lineTo(sx,H);
+  }
+  for(let y=Math.floor(wy0/step)*step; y<wy1; y+=step){
+    const sy = W2S(0,y)[1]; ctx.moveTo(0,sy); ctx.lineTo(W,sy);
+  }
+  ctx.stroke();
+  // 5m 主格
+  ctx.strokeStyle = "#dcd7cd"; ctx.beginPath();
+  const big = 500;
+  for(let x=Math.floor(wx0/big)*big; x<wx1; x+=big){
+    const sx = W2S(x,0)[0]; ctx.moveTo(sx,0); ctx.lineTo(sx,H);
+  }
+  for(let y=Math.floor(wy0/big)*big; y<wy1; y+=big){
+    const sy = W2S(0,y)[1]; ctx.moveTo(0,sy); ctx.lineTo(W,sy);
+  }
+  ctx.stroke();
+
+  // ---- 后院地坪 ----
+  if(show.grass){
+    L.grass.forEach(g=>{
+      const [x,y,w,h] = rectW(g.x0,g.y0,g.x1,g.y1);
+      ctx.fillStyle = "#dfe8cd"; ctx.fillRect(x,y,w,h);
+    });
+  }
+
+  // ---- 地块：人行道 / 路缘 / 车行道 / 草地 / 铺装 / 对面楼（全部由布局驱动，可拖可拉边）----
+  const bandRects = [];
+  if(show.bands) L.bands.forEach((b,i)=>{
+    const [x,y,w,h] = rectW(b.x0,b.y0,b.x1,b.y1);
+    const kd = BAND_KINDS[b.kind] || BAND_KINDS.lot;
+    ctx.fillStyle = kd.fill;
+    ctx.fillRect(x,y,w,h);
+    // 边界线：地块之间要能看出分层，不然一整片灰看不出哪条是哪条
+    ctx.strokeStyle="rgba(150,143,132,.55)"; ctx.lineWidth=1;
+    ctx.strokeRect(x+0.5,y+0.5,w-1,h-1);
+    bandRects.push({b,i,x,y,w,h});
+  });
+  // 车行道中心虚线（每条 road 各画一条，横竖自动判断朝向）
+  if(show.bands) L.bands.filter(b=>b.kind==="road").forEach(b=>{
+    const [x,y,w,h] = rectW(b.x0,b.y0,b.x1,b.y1);
+    ctx.strokeStyle="#f2f0ec"; ctx.lineWidth=Math.max(1,2*view.k*40);
+    ctx.setLineDash([30*view.k,50*view.k]);
+    ctx.beginPath();
+    if(w>=h){ const my=y+h/2; ctx.moveTo(x,my); ctx.lineTo(x+w,my); }
+    else    { const mx=x+w/2; ctx.moveTo(mx,y); ctx.lineTo(mx,y+h); }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+  // 地块名字：⚠️ 标签贴在 b.x0+8 会被画到画布外（这几条带子 x 从 -2000 一直到 5312），
+  //    所以夹到可视区里再画，并加一层底片保证在任何底色上都读得出来。
+  // ⛔ 2026-10-31：标签必须最后画。原来在这里画，被后面画的停车/树/杆压住，
+  //    「楼前停车前场 525cm」只剩几个字露在车缝里 = 白画。
+  //    ⇒ 挪到 draw() 末尾调用 drawBandLabels(bandRects)。
+  // 停车场车位划线（lot 地块上的 pitch 字段，0 / 不填 = 不划）
+  // ⭐ 没有线的话 11 台车只是一排灰盒子，看不出是「垂直车位」；照片里最显眼的就是这排线。
+  if(show.bands) L.bands.forEach(b=>{
+    const p = Number(b.pitch) || 0;
+    if(b.kind !== "lot" || p <= 0) return;
+    const horiz = (b.x1 - b.x0) >= (b.y1 - b.y0);
+    ctx.strokeStyle = "rgba(250,250,247,.9)";
+    ctx.lineWidth = Math.max(1, 3 * view.k);
+    ctx.beginPath();
+    if(horiz){
+      for(let x = b.x0 + p; x < b.x1 - 1; x += p){
+        const a = W2S(x, b.y0), c2 = W2S(x, b.y1);
+        ctx.moveTo(a[0], a[1]); ctx.lineTo(c2[0], c2[1]);
+      }
+    } else {
+      for(let y = b.y0 + p; y < b.y1 - 1; y += p){
+        const a = W2S(b.x0, y), c2 = W2S(b.x1, y);
+        ctx.moveTo(a[0], a[1]); ctx.lineTo(c2[0], c2[1]);
+      }
+    }
+    ctx.stroke();
+  });
+  // 选中地块的边框 + 四边把手
+  const selBand = sel && sel.type==="bands" ? L.bands[sel.i] : null;
+  if(show.bands && selBand){
+    const [x,y,w,h] = rectW(selBand.x0,selBand.y0,selBand.x1,selBand.y1);
+    ctx.strokeStyle="#1a73c8"; ctx.lineWidth=2; ctx.setLineDash([]);
+    ctx.strokeRect(x,y,w,h);
+    ctx.fillStyle="#1a73c8";
+    [[x+w/2,y],[x+w/2,y+h],[x,y+h/2],[x+w,y+h/2]].forEach(([hx,hy])=>{
+      ctx.fillRect(hx-5,hy-5,10,10);
+    });
+  }
+  let q;
+
+  // ---- 楼体 ----
+  q = rectW(SITE.build.x0, SITE.build.y0, SITE.build.x1, SITE.build.y1);
+  ctx.fillStyle="#c9b8a4"; ctx.fillRect(q[0],q[1],q[2],q[3]);
+  // 外廊
+  q = rectW(SITE.build.x0, SITE.corr.y0, SITE.build.x1, SITE.corr.y1);
+  ctx.fillStyle="#efe8dc"; ctx.fillRect(q[0],q[1],q[2],q[3]);
+  // 户分隔 + 房号
+  ctx.strokeStyle="#b6a48f"; ctx.lineWidth=1;
+  ctx.beginPath();
+  for(let i=1;i<SITE.units;i++){
+    // ⚠️ 必须从 build.x0 起算。原来写死 i*SITE.unit，等于假设楼从 x=0 开始，
+    //    楼一挪位分隔线就整排错开。
+    const sx = W2S(SITE.build.x0 + i*SITE.unit, 0)[0];
+    ctx.moveTo(sx, W2S(0,SITE.build.y0)[1]);
+    ctx.lineTo(sx, W2S(0,SITE.build.y1)[1]);
+  }
+  ctx.stroke();
+  if(view.k>0.10){
+    ctx.fillStyle="#8c7f6f"; ctx.font="10px sans-serif"; ctx.textAlign="center";
+    const bb = BL();
+    for(let i=0;i<SITE.units;i++){
+      const cx = SITE.build.x0 + (i+0.5)*SITE.unit;
+      // 房号竖直位置取「楼体自上而下 62% 处」，任何深浅的楼都不会掉出去
+      const ty2 = SITE.build.y0 + (SITE.build.y1 - SITE.build.y0) * 0.62;
+      const sx = W2S(cx,0)[0], sy = W2S(0,ty2)[1];
+      ctx.fillText(String(bb.noStart + i), sx, sy);
+    }
+  }
+  // 楼梯（布局里没写 stair 就跳过——不是每栋楼都有外挂梯）
+  if(SITE.hasStair){
+    const st = SITE.stair;
+    q = rectW(st.x0, st.y0, st.x1, st.y1);
+    ctx.fillStyle="#bfb7ab"; ctx.fillRect(q[0],q[1],q[2],q[3]);
+    ctx.strokeStyle="#8f7f6b"; ctx.lineWidth=1; ctx.strokeRect(q[0],q[1],q[2],q[3]);
+  }
+  // 楼体边框
+  q = rectW(SITE.build.x0, SITE.build.y0, SITE.build.x1, SITE.build.y1);
+  ctx.strokeStyle="#8f7f6b"; ctx.lineWidth=1.5; ctx.strokeRect(q[0],q[1],q[2],q[3]);
+
+  // ---- 停车 ----
+  // ⭐ rot:90 = 车长沿 y 轴（垂直车位，车头朝楼）。原来固定「车长沿 x」，摆不出照片里那种车位。
+  if(show.cars) L.cars.forEach((c,i)=>{
+    const [x,y,w,h] = carBox(c);
+    ctx.fillStyle="#9aa3ac"; ctx.fillRect(x,y,w,h);
+    ctx.fillStyle="#7d8892";
+    if(c.rot) ctx.fillRect(x+w*0.18, y+h*0.12, w*0.5, h*0.76);
+    else      ctx.fillRect(x+w*0.12, y+h*0.18, w*0.76, h*0.5);
+    if(sel&&sel.type==="cars"&&sel.i===i) outline(x,y,w,h);
+  });
+
+  // ---- 树（先画，冠幅最大，压在最底层）----
+  if(show.trees) L.trees.forEach((t,i)=>{
+    // 冠幅优先用树上自带的 w/h（通用版：不认识的树种也能画对大小），
+    // 没写才查 MODELS 预设表，再没有就按 4m 冠 / 7m 高兜底。
+    const m = (t.w ? {w:t.w, h:t.h||700, k:t.k||"broad"} : MODELS[t.model]) || {w:400,h:700,k:"broad"};
+    const R = Math.max(3, (m.w*t.scale/2)*view.k);
+    const [sx,sy] = W2S(t.x,t.y);
+    ctx.beginPath(); ctx.arc(sx,sy,R,0,7);
+    ctx.fillStyle = KIND_COLOR[m.k]||"#4e8a44"; ctx.globalAlpha=0.62; ctx.fill(); ctx.globalAlpha=1;
+    ctx.strokeStyle="#2c4a2a"; ctx.lineWidth=1.1; ctx.stroke();
+    ctx.beginPath(); ctx.arc(sx,sy,Math.max(1.6,R*0.14),0,7);
+    ctx.fillStyle="#5a4632"; ctx.fill();
+    if(sel&&sel.type==="trees"&&sel.i===i) ring(sx,sy,R+4);
+  });
+
+  // ---- 电线杆 ----
+  // ⭐ 杆画出「横担」这个特征，否则 26cm 的杆直径在平面上只是个点，和路灯分不开。
+  if(show.poles) L.poles.forEach((p,i)=>{
+    const [sx,sy] = W2S(p.x,p.y);
+    const R = Math.max(5, 20*view.k);
+    const al = Math.max(R*2.4, 9);
+    ctx.beginPath(); ctx.moveTo(sx-al,sy); ctx.lineTo(sx+al,sy);
+    ctx.strokeStyle="#7a6650"; ctx.lineWidth=Math.max(2, R*0.7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(sx,sy,R,0,7); ctx.fillStyle="#6b5b4a"; ctx.fill();
+    ctx.strokeStyle="#3f3529"; ctx.lineWidth=1.2; ctx.stroke();
+    if(sel&&sel.type==="poles"&&sel.i===i) ring(sx,sy,R+4);
+  });
+
+  // ---- 路灯（最后画：他要调的就是这个，不能被树盖住）----
+  if(show.lamps) L.lamps.forEach((p,i)=>{
+    const [sx,sy] = W2S(p.x,p.y);
+    const R = Math.max(5, 16*view.k);
+    const dx = p.side==="left"? -1 : 1;
+    // 灯臂 + 灯头：一盏灯的识别特征就是「一根伸向马路的臂」
+    const armL = Math.max(R*4.0, 18);
+    ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(sx+dx*armL, sy);
+    ctx.strokeStyle="#2f5d7a"; ctx.lineWidth=Math.max(1.5, R*0.45); ctx.stroke();
+    ctx.beginPath(); ctx.arc(sx+dx*armL, sy, Math.max(R*0.55,2.6), 0, 7);
+    ctx.fillStyle="#ffe9a8"; ctx.fill();
+    ctx.strokeStyle="#2f5d7a"; ctx.lineWidth=1.1; ctx.stroke();
+    // 灯柱
+    ctx.beginPath(); ctx.arc(sx,sy,R,0,7); ctx.fillStyle="#3d6f8f"; ctx.fill();
+    ctx.strokeStyle="#1f4459"; ctx.lineWidth=1.3; ctx.stroke();
+    if(sel&&sel.type==="lamps"&&sel.i===i) ring(sx,sy,R+4);
+  });
+
+  // ---- 草丛区块边框 ----
+  if(show.grass) L.grass.forEach((g,i)=>{
+    const [x,y,w,h] = rectW(g.x0,g.y0,g.x1,g.y1);
+    ctx.strokeStyle="#8aa878"; ctx.lineWidth=1; ctx.setLineDash([5,4]);
+    ctx.strokeRect(x,y,w,h); ctx.setLineDash([]);
+    if(sel&&sel.type==="grass"&&sel.i===i) outline(x,y,w,h);
+  });
+
+  // ---- 地块标签（必须最后画，否则被停车/树/杆压住）----
+  if(show.bands && view.k>0.10) drawBandLabels(bandRects, W);
+
+  // ---- 比例尺 ----
+  drawScale(W,H);
+  // ---- 指北 ----
+  ctx.fillStyle="#9a938a"; ctx.font="11px sans-serif"; ctx.textAlign="left";
+  ctx.fillText("↑ 楼后（后院，y<0）    ↓ 街道（y>540）", 12, H-12);
+
+  stEl.innerHTML = hover
+    ? `光标 <b>x ${Math.round(hover[0])}</b> cm, <b>y ${Math.round(hover[1])}</b> cm`
+    : "—";
+  const n = L.poles.length+L.lamps.length+L.trees.length+L.grass.length+L.cars.length;
+  cntEl.textContent = `杆 ${L.poles.length} · 灯 ${L.lamps.length} · 树 ${L.trees.length} · 草 ${L.grass.length} · 车 ${L.cars.length}　合计 ${n}`;
+}
+
+function outline(x,y,w,h){
+  ctx.strokeStyle="#1a73c8"; ctx.lineWidth=2; ctx.setLineDash([4,3]);
+  ctx.strokeRect(x-1,y-1,w+2,h+2); ctx.setLineDash([]);
+}
+/* 地块名字。调用点在 draw() 末尾 —— 见那里的注释。
+   ⚠️ W（画布宽）是 draw() 的局部变量，必须传进来，别指望外层能看见。 */
+function drawBandLabels(rects, W){
+  rects.forEach(({b,x,y,w,h})=>{
+    if(h<16) return;                                   // 路缘石只有 16cm，标签会糊成一团
+    if(Math.min(x+w, W) - Math.max(x, 6) < 90) return;  // 露出来的宽度不够就不写
+    const tx = Math.max(x, 6) + 8;
+    const label = `${b.name || (BAND_KINDS[b.kind]||{}).cn || "地块"}  ${Math.round(b.y1-b.y0)}cm`;
+    ctx.font="12px sans-serif"; ctx.textAlign="left"; ctx.textBaseline="middle";
+    const tw = ctx.measureText(label).width;
+    const ty = y + Math.min(h/2, 16);
+    ctx.fillStyle="rgba(252,250,246,.88)";
+    ctx.fillRect(tx-3, ty-8, tw+6, 16);
+    ctx.fillStyle="rgba(70,64,54,.92)";
+    ctx.fillText(label, tx, ty);
+    ctx.textBaseline="alphabetic";
+  });
+}
+function ring(x,y,r){
+  ctx.beginPath(); ctx.arc(x,y,r,0,7);
+  ctx.strokeStyle="#1a73c8"; ctx.lineWidth=2; ctx.stroke();
+}
+function drawScale(W,H){
+  let cm = 1000;
+  while(cm*view.k > W*0.42) cm /= 2;
+  while(cm*view.k < W*0.12) cm *= 2;
+  const px = cm*view.k;
+  const x0 = W-px-18, y0 = H-22;
+  ctx.strokeStyle="#5d574e"; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x0+px,y0);
+  ctx.moveTo(x0,y0-4); ctx.lineTo(x0,y0+4);
+  ctx.moveTo(x0+px,y0-4); ctx.lineTo(x0+px,y0+4); ctx.stroke();
+  ctx.fillStyle="#5d574e"; ctx.font="11px sans-serif"; ctx.textAlign="center";
+  ctx.fillText(cm>=100? (cm/100)+" m" : cm+" cm", x0+px/2, y0-8);
+}
+
+/* ============================================================
+   命中测试
+   ============================================================ */
+function pick(sx,sy){
+  const [wx,wy] = S2W(sx,sy);
+  const tol = Math.max(14, 30*view.k) / view.k;
+  // 后加的优先（画在上层）
+  for(const type of ["trees","lamps","poles"]){
+    const arr = L[type];
+    for(let i=arr.length-1;i>=0;i--){
+      const o = arr[i];
+      let r = tol;
+      if(type==="trees"){
+        const m = MODELS[o.model]||{w:400};
+        r = Math.max(tol, m.w*o.scale/2*0.9);
+      }
+      if(Math.hypot(o.x-wx,o.y-wy) <= r) return {type,i};
+    }
+  }
+  // 小盒子类：⭐ 取「面积最小的那个命中框」，不是「最后加的那个」。
+  //    原来按后加优先，一个小的草丛块加进那个覆盖整个后院的大块里就会被大块抢走点击。
+  //    ⛔ 草丛用 x0/y0/x1/y1，停车用 x/y/len/160 —— 两套字段，别混着读（混了就是 NaN，永远命中不了）。
+  let best = null, bestA = Infinity;
+  for(const type of ["cars","grass"]){
+    const arr = L[type];
+    for(let i=0;i<arr.length;i++){
+      const o = arr[i];
+      let ax0, ay0, ax1, ay1;
+      if(type==="cars"){ const f = carFP(o); ax0=f[0]; ay0=f[1]; ax1=f[2]; ay1=f[3]; }
+      else { ax0=o.x0; ay0=o.y0; ax1=o.x1; ay1=o.y1; }
+      if(ax1<ax0){ const t=ax0; ax0=ax1; ax1=t; }
+      if(ay1<ay0){ const t=ay0; ay0=ay1; ay1=t; }
+      if(wx>=ax0 && wx<=ax1 && wy>=ay0 && wy<=ay1){
+        const a = (ax1-ax0)*(ay1-ay0);
+        if(a < bestA){ bestA = a; best = {type,i}; }
+      }
+    }
+  }
+  if(best) return best;
+  // 地块放最后：它们贯穿全场，要是优先级太高手一抖就选中马路而不是电线杆
+  for(let i=L.bands.length-1;i>=0;i--){
+    const b = L.bands[i];
+    if(wx>=b.x0&&wx<=b.x1&&wy>=b.y0&&wy<=b.y1) return {type:"bands",i};
+  }
+  return null;
+}
+
+/* 矩形类对象（草丛 / 地块）的四边把手：返回 'y0'|'y1'|'x0'|'x1'|null */
+function pickEdge(type, i, sx, sy){
+  const o = L[type][i]; if(!o) return null;
+  const [x,y,w,h] = rectW(o.x0,o.y0,o.x1,o.y1);
+  const G = 7;
+  if(Math.abs(sy-y)<=G && sx>=x-G && sx<=x+w+G) return "y0";
+  if(Math.abs(sy-(y+h))<=G && sx>=x-G && sx<=x+w+G) return "y1";
+  if(Math.abs(sx-x)<=G && sy>=y-G && sy<=y+h+G) return "x0";
+  if(Math.abs(sx-(x+w))<=G && sy>=y-G && sy<=y+h+G) return "x1";
+  return null;
+}
+
+/* ============================================================
+   交互
+   ============================================================ */
+cv.addEventListener("contextmenu", e=>e.preventDefault());
+
+cv.addEventListener("mousedown", e=>{
+  cv.focus();
+  const s = mouse(e);
+  if(e.button===2 || spaceDown || (e.button===1)){
+    drag = {mode:"pan", sx:s[0], sy:s[1], ox:view.ox, oy:view.oy}; return;
+  }
+  if(e.button!==0) return;
+
+  if(tool==="select"){
+    // 先看是不是在拖已选中矩形的边（草丛 / 地块）。这条必须先于 pick，
+    // 否则手的落点在边线外侧时会选到别的对象，永远拉不到边。
+    if(sel && (sel.type==="bands" || sel.type==="grass")){
+      const edge = pickEdge(sel.type, sel.i, s[0], s[1]);
+      if(edge){
+        pushHist();
+        drag = {mode:"edge", type:sel.type, i:sel.i, edge};
+        draw(); return;
+      }
+    }
+    const hit = pick(s[0],s[1]);
+    sel = hit; renderInsp();
+    if(hit){
+      pushHist();
+      const [wx,wy] = S2W(s[0],s[1]);
+      const o = L[hit.type][hit.i];
+      const isRect = (hit.type==="grass" || hit.type==="cars" || hit.type==="bands");
+      drag = {mode:"move", type:hit.type, i:hit.i,
+              dx:(isRect ? (o.x0!==undefined?o.x0:o.x) : o.x) - wx,
+              dy:(isRect ? (o.y0!==undefined?o.y0:o.y) : o.y) - wy,
+              box:isRect};
+    }
+    draw(); return;
+  }
+
+  // 新增
+  const [wx,wy] = S2W(s[0],s[1]);
+  pushHist();
+  if(tool==="pole"){ L.poles.push({x:Math.round(wx), y:Math.round(wy)}); sel={type:"poles",i:L.poles.length-1}; }
+  else if(tool==="lamp"){ L.lamps.push({x:Math.round(wx), y:Math.round(wy), h:450, side:"right"}); sel={type:"lamps",i:L.lamps.length-1}; }
+  else if(tool==="tree"){
+    L.trees.push({model:"CommonTree_1", x:Math.round(wx), y:Math.round(wy), scale:0.55, rot:0, sat:0.72, val:1.18});
+    sel={type:"trees",i:L.trees.length-1};
+  }
+  else if(tool==="grass"){
+    L.grass.push({x0:Math.round(wx), y0:Math.round(wy), x1:Math.round(wx)+1500, y1:Math.round(wy)+800});
+    sel={type:"grass",i:L.grass.length-1};
+  }
+  else if(tool==="car"){
+    // 落在「停车场/场地」地块里 → 默认垂直车位（车长竖着），落在路面上 → 沿路停
+    const inLot = L.bands.some(b=>b.kind==="lot" && wx>=b.x0&&wx<=b.x1&&wy>=b.y0&&wy<=b.y1);
+    const c = {x:Math.round(wx), y:Math.round(wy), len:440};
+    if(inLot) c.rot = 90;
+    L.cars.push(c);
+    sel={type:"cars",i:L.cars.length-1};
+  }
+  else if(tool==="band"){
+    L.bands.push({kind:"road", name:"新车行道", x0:Math.round(wx), y0:Math.round(wy),
+                  x1:Math.round(wx)+1200, y1:Math.round(wy)+700});
+    sel={type:"bands",i:L.bands.length-1};
+  }
+  // ⭐ 放完一个自动回到「选择/移动」。
+  //    原来工具一直挂着 ⇒ 想选中刚放下的东西，一点又是一次「新增」，
+  //    表现就是「草丛只能生成不能选中」。要连着放就勾工具栏的「连续放」。
+  if(!continuousPick) setTool("select");
+  renderInsp(); draw();
+});
+
+function mouse(e){
+  const r = cv.getBoundingClientRect();
+  return [e.clientX-r.left, e.clientY-r.top];
+}
+
+window.addEventListener("mousemove", e=>{
+  const r = cv.getBoundingClientRect();
+  const inside = e.clientX>=r.left&&e.clientX<=r.right&&e.clientY>=r.top&&e.clientY<=r.bottom;
+  const s = [e.clientX-r.left, e.clientY-r.top];
+  hover = inside ? S2W(s[0],s[1]) : hover;
+
+  if(drag){
+    if(drag.mode==="pan"){
+      view.ox = drag.ox - (s[0]-drag.sx)/view.k;
+      view.oy = drag.oy - (s[1]-drag.sy)/view.k;
+    } else if(drag.mode==="edge"){
+      // 拉边改宽度。⭐ 相邻地块不会自动跟着走 —— 「路缘石」拉窄了「人行道」和「车行道」
+      // 之间就会露缝。属性面板里三个数字对着改最快。
+      const [wx,wy] = S2W(s[0],s[1]);
+      const o = L[drag.type][drag.i];
+      if(o){
+        const v = Math.round(drag.edge==="x0"||drag.edge==="x1" ? wx : wy);
+        o[drag.edge] = v;
+        // 防翻转：x0/x1、y0/y1 交叉了就互换
+        if(o.x1<o.x0){ const t=o.x0; o.x0=o.x1; o.x1=t; }
+        if(o.y1<o.y0){ const t=o.y0; o.y0=o.y1; o.y1=t; }
+        if(sel) renderInsp(true);
+      }
+    } else if(drag.mode==="move"){
+      const [wx,wy] = S2W(s[0],s[1]);
+      const o = L[drag.type][drag.i];
+      if(o){
+        if(drag.box){
+          const nx = Math.round(wx+drag.dx), ny = Math.round(wy+drag.dy);
+          if(drag.type==="grass" || drag.type==="bands"){
+            const w = o.x1-o.x0, h = o.y1-o.y0;
+            o.x0 = nx; o.y0 = ny; o.x1 = nx+w; o.y1 = ny+h;
+          } else { o.x = nx; o.y = ny; }
+        } else {
+          o.x = Math.round(wx+drag.dx);
+          o.y = Math.round(wy+drag.dy);
+        }
+        if(sel) renderInsp(true);
+      }
+    }
+    draw();
+  } else if(inside){
+    // 悬停在已选中矩形的边上时给个「可拉」的光标
+    let cur = tool==="select" ? "default" : "crosshair";
+    if(sel && (sel.type==="bands"||sel.type==="grass")){
+      const ed = pickEdge(sel.type, sel.i, s[0], s[1]);
+      if(ed) cur = (ed==="x0"||ed==="x1") ? "ew-resize" : "ns-resize";
+    }
+    if(cv.style.cursor!==cur) cv.style.cursor = cur;
+    draw();
+  }
+});
+
+window.addEventListener("mouseup", ()=>{ drag=null; });
+
+cv.addEventListener("wheel", e=>{
+  e.preventDefault();
+  const s = mouse(e);
+  const [wx,wy] = S2W(s[0],s[1]);
+  const f = e.deltaY<0 ? 1.14 : 1/1.14;
+  view.k = Math.max(0.012, Math.min(6, view.k*f));
+  view.ox = wx - s[0]/view.k;
+  view.oy = wy - s[1]/view.k;
+  draw();
+}, {passive:false});
+
+let spaceDown=false;
+window.addEventListener("keydown", e=>{
+  if(e.code==="Space"){ spaceDown=true; e.preventDefault(); }
+  if((e.key==="Delete"||e.key==="Backspace") && sel && document.activeElement.tagName!=="INPUT"){
+    e.preventDefault();
+    if(sel.type==="bands" && L.bands[sel.i].locked){ toast("基础地块不能删"); return; }
+    pushHist();
+    L[sel.type].splice(sel.i,1); sel=null; renderInsp(); draw();
+  }
+  if(e.key==="Escape" && sel && document.activeElement.tagName!=="INPUT"){
+    sel=null; renderInsp(); draw();
+  }
+  if(e.ctrlKey && e.key.toLowerCase()==="z"){ e.preventDefault(); undo(); }
+});
+window.addEventListener("keyup", e=>{ if(e.code==="Space") spaceDown=false; });
+
+/* ============================================================
+   属性面板
+   ============================================================ */
+const TYPE_CN = {bands:"地块", poles:"电线杆", lamps:"路灯", trees:"树", grass:"草丛区块", cars:"停车"};
+
+function renderInsp(light){
+  if(!sel){ insp.innerHTML = '<div class="empty">没选中东西。<br><br>· 拖 = 移动<br>· 滚轮 = 缩放<br>· 右键拖 / 空格拖 = 平移<br>· Del = 删除<br>· Esc = 取消选择<br>· 选工具后在地图上点 = 新增<br>· 选中「草丛」或「地块」后拉四条边 = 改宽窄</div>'; return; }
+  const o = L[sel.type][sel.i];
+  if(!o){ sel=null; return renderInsp(); }
+  let h = `<span class="tag">${TYPE_CN[sel.type]}${o.name?" · "+o.name:""} #${sel.i+1}</span>`;
+
+  if(sel.type==="grass" || sel.type==="bands"){
+    h += num("x0 左", o, "x0") + num("y0 上", o, "y0") + num("x1 右", o, "x1") + num("y1 下", o, "y1");
+    const wv=o.x1-o.x0, hv=o.y1-o.y0;
+    h += `<div class="row"><label>尺寸</label><input value="${wv} × ${hv} cm　( ${(wv/100).toFixed(2)} × ${(hv/100).toFixed(2)} m )" disabled></div>`;
+    if(sel.type==="bands"){
+      h += `<div class="row"><label>类型</label><select data-k="kind">` +
+           Object.keys(BAND_KINDS).map(k=>`<option value="${k}"${k===o.kind?" selected":""}>${BAND_KINDS[k].cn}</option>`).join("") +
+           `</select></div>`;
+      h += `<div class="row"><label>名字</label><input data-k="name" value="${o.name||""}"></div>`;
+      h += `<div class="row"><label>深 (m)</label><input type="number" step="0.05" data-size="1" value="${(hv/100).toFixed(2)}"></div>`;
+      if(o.kind === "lot"){
+        h += `<div class="row"><label>划线间距</label><input type="number" step="10" min="0" data-k="pitch" value="${Number(o.pitch)||0}"></div>`;
+        h += `<div class="row" style="color:#6d675e;font-size:11.5px">划线间距 = 车位宽。填 0 不划线。</div>`;
+      }
+      h += `<div class="row" style="color:#6d675e;font-size:11.5px;line-height:1.5">
+            地块是铺地用的矩形。改「y0 / y1」= 改它的进深，相邻地块不会自动跟着让位，
+            露缝或压叠就自己把邻居的数字也改一下。类型决定渲染成沥青/人行道/草地/铺装。</div>`;
+    }
+  } else {
+    h += num("x (cm)", o, "x") + num("y (cm)", o, "y");
+    if(sel.type==="trees"){
+      h += `<div class="row"><label>模型</label><select data-k="model">` +
+           Object.keys(MODELS).map(m=>`<option${m===o.model?" selected":""}>${m}</option>`).join("") +
+           `</select></div>`;
+      h += num("缩放", o, "scale", 0.05, 3, 0.01);
+      h += num("旋转°", o, "rot", -360, 360, 1);
+      h += `<div class="row"><label>饱和</label><input type="range" min="0" max="1.4" step="0.02" data-k="sat" value="${o.sat}"><span style="width:34px;text-align:right">${o.sat.toFixed(2)}</span></div>`;
+      h += `<div class="row"><label>明度</label><input type="range" min="0.4" max="1.8" step="0.02" data-k="val" value="${o.val}"><span style="width:34px;text-align:right">${o.val.toFixed(2)}</span></div>`;
+      const m = MODELS[o.model]||{w:400,h:700};
+      h += `<div class="row"><label>成品</label><input value="高 ${(m.h*o.scale/100).toFixed(2)} m ｜ 冠 ${(m.w*o.scale/100).toFixed(2)} m" disabled></div>`;
+    }
+    if(sel.type==="lamps"){
+      h += num("杆高 (cm)", o, "h", 150, 1200, 10);
+      h += `<div class="row"><label>灯头向</label><select data-k="side">
+            <option value="right"${o.side!=="left"?" selected":""}>右（朝街心）</option>
+            <option value="left"${o.side==="left"?" selected":""}>左（朝建筑）</option></select></div>`;
+    }
+    if(sel.type==="cars"){
+      h += num("车长 (cm)", o, "len", 200, 700, 10);
+      h += `<div class="row"><label>朝向</label><select data-k="rotSel">
+            <option value="0"${o.rot?"":" selected"}>沿路（车长横着）</option>
+            <option value="90"${o.rot?" selected":""}>垂直车位（车长竖着）</option></select></div>`;
+      const f = carFP(o);
+      h += `<div class="row"><label>占位</label><input value="宽 ${Math.round(f[2]-f[0])} × 深 ${Math.round(f[3]-f[1])} cm" disabled></div>`;
+    }
+  }
+  h += (sel.type==="bands" && o.locked)
+     ? `<div class="row" style="color:#6d675e;font-size:11.5px">基础地块（人行道/车行道/对面楼）不能删，只能改尺寸。</div>`
+     : `<button class="del" id="delBtn">删除这个</button>`;
+  insp.innerHTML = h;
+  insp.querySelectorAll("input[data-k],select[data-k]").forEach(el=>{
+    el.addEventListener("input", ()=>{
+      const k = el.dataset.k;
+      let v = el.type==="range" ? parseFloat(el.value) : el.value;
+      if(el.type!=="range" && el.tagName!=="SELECT") v = Number(v);
+      if(el.tagName!=="SELECT" && typeof v==="number" && isNaN(v)) return;
+      // 车位朝向是下拉里显示的，存进去要变成 0/90 的 rot
+      const key = k === "rotSel" ? "rot" : k;
+      L[sel.type][sel.i][key] = (k === "rotSel") ? Number(v) : v;
+      if(k === "rotSel"){ renderInsp(); draw(); return; }
+      if(el.type==="range") el.nextElementSibling.textContent = Number(v).toFixed(2);
+      draw();
+    });
+  });
+  // 「深 (m)」快捷输入：只改 y1，y0 不动 ⇒ 从靠街那一侧往里加厚/减薄
+  insp.querySelectorAll("input[data-size]").forEach(el=>{
+    el.addEventListener("input", ()=>{
+      const v = Number(el.value);
+      if(!Number.isFinite(v) || v<=0) return;
+      const o = L[sel.type][sel.i];
+      o.y1 = Math.round(o.y0 + v*100);
+      renderInsp(); draw();
+    });
+  });
+  const db = document.getElementById("delBtn");
+  if(db) db.addEventListener("click", ()=>{ pushHist(); L[sel.type].splice(sel.i,1); sel=null; renderInsp(); draw(); });
+}
+
+function num(label,o,k,min,max,step){
+  return `<div class="row"><label>${label}</label><input type="number" data-k="${k}"
+    value="${o[k]}" ${min!==undefined?`min="${min}"`:""} ${max!==undefined?`max="${max}"`:""}
+    ${step!==undefined?`step="${step}"`:""}></div>`;
+}
+
+/* ============================================================
+   工具条 / 按钮
+   ============================================================ */
+let continuousPick = false;
+function setTool(t){
+  tool = t;
+  [...document.getElementById("tools").children].forEach(x=>x.classList.toggle("on", x.dataset.t===t));
+  cv.style.cursor = t==="select" ? "default" : "crosshair";
+}
+document.getElementById("tools").addEventListener("click", e=>{
+  const b = e.target.closest("button"); if(!b) return;
+  setTool(b.dataset.t);
+});
+
+document.getElementById("fit").onclick = ()=> fitTo(contentBox());
+document.getElementById("fitSite").onclick = ()=> fitTo(SITE.site, 20);
+document.getElementById("undo").onclick = ()=> undo();
+document.getElementById("contPick").addEventListener("change", e=>{ continuousPick = e.target.checked; });
+
+/* 方案文件下拉 —— ⭐ 通用版的核心便利：
+   「换一套布局」不再是内置预设，而是换一个 json 文件。
+   ⛔ 这里只负责「渲染 + 响应」，不自己发请求：文件列表由 boot() 统一取了传进来。
+      曾经写成两个各自 fetch /api/list 的 IIFE，结果它们抢着决定 CURRENT_FILE，
+      下拉里显示的常常不是实际载入的那个文件 —— 竞态，不是逻辑错。 */
+function setupFilePicker(files){
+  const sel0 = document.getElementById("preset");
+  if(!files || !files.length){
+    sel0.innerHTML = `<option value="">（没找到 json，用「导入」按钮）</option>`;
+    return;
+  }
+  sel0.innerHTML = files.map(f=>`<option${f===CURRENT_FILE?" selected":""}>${f}</option>`).join("");
+  sel0.addEventListener("change", async ()=>{
+    const f = sel0.value;
+    if(!f || f === CURRENT_FILE) return;
+    try{
+      const r = await fetch(f, {cache:"no-store"});
+      if(!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      pushHist();
+      L = normalize(d); CURRENT_FILE = f; sel = null;
+      renderInsp(); resize(); fitTo(contentBox());
+      toast("已切换到 " + f);
+    }catch(err){ toast("打不开 " + f + "：" + err.message); }
+  });
+}
+
+function pushHist(){
+  hist.push(JSON.stringify(L));
+  if(hist.length>60) hist.shift();
+}
+function undo(){
+  if(!hist.length) return toast("没有可撤销的");
+  L = JSON.parse(hist.pop()); sel=null; renderInsp(); draw();
+}
+
+document.getElementById("exp").onclick = ()=>{
+  const blob = new Blob([JSON.stringify(L,null,1)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "layout.json"; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 3000);
+  toast("已下载 layout.json");
+};
+
+document.getElementById("imp").onclick = ()=> document.getElementById("file").click();
+document.getElementById("file").onchange = e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const rd = new FileReader();
+  rd.onload = ()=>{
+    try{
+      const d = JSON.parse(rd.result);
+      for(const k of ["poles","lamps","trees","grass","cars"]) if(!Array.isArray(d[k])) d[k]=[];
+      pushHist(); L = normalize(d); sel=null; renderInsp(); draw(); fitTo(contentBox());
+      toast("已导入");
+    }catch(err){ toast("导入失败："+err.message); }
+  };
+  rd.readAsText(f);
+  e.target.value = "";
+};
+
+document.getElementById("save").onclick = async ()=>{
+  if(!serverOK){ toast("没连上本地服务 —— 用“导出 JSON”"); return; }
+  try{
+    const r = await fetch("/save?file=" + encodeURIComponent(CURRENT_FILE),
+      {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(L)});
+    const j = await r.json();
+    toast(j.ok ? ("已写入 " + (j.file || CURRENT_FILE)) : ("保存失败：" + j.err));
+  }catch(err){ toast("保存失败："+err.message); }
+};
+
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.classList.add("on");
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove("on"), 1800);
+}
+
+/* 图层显隐 */
+const LAYERS = [["bands","地块(路/人行道)"],["poles","电线杆"],["lamps","路灯"],["trees","树"],["grass","草丛"],["cars","停车"]];
+document.getElementById("layers").innerHTML = LAYERS.map(([k,n])=>
+  `<label style="display:flex;gap:7px;align-items:center;cursor:pointer">
+     <input type="checkbox" data-l="${k}" checked> ${n}</label>`).join("");
+document.getElementById("layers").addEventListener("change", e=>{
+  const k = e.target.dataset.l; if(!k) return;
+  show[k] = e.target.checked; draw();
+});
+
+/* ============================================================
+   启动
+   ============================================================ */
+// ⭐ 读进来的布局统一补字段。⛔ 路灯历史上只有 {x,h,side}，缺 y ⇒ 曾经把整张图弄瞎，
+//    所以这里「缺什么补什么」而不是信赖文件内容。
+function normalize(d){
+  for(const k of ["poles","lamps","trees","grass","cars","bands"]) if(!Array.isArray(d[k])) d[k]=[];
+  // 楼体兜底：老布局文件没有 building，就按默认给一栋，别让画布空白
+  if(!d.building || typeof d.building !== "object") d.building = JSON.parse(JSON.stringify(DEFAULT_LAYOUT.building));
+  if(!d.building.box) d.building.box = JSON.parse(JSON.stringify(DEFAULT_LAYOUT.building.box));
+  const bx = d.building.box;
+  for(const q of ["x0","y0","x1","y1"]) if(!Number.isFinite(Number(bx[q]))) bx[q] = 0;
+  if(bx.x1 <= bx.x0 || bx.y1 <= bx.y0){
+    console.warn("[LAYOUT] building.box 退化，按 30×6m 兜底");
+    d.building.box = {x0:0, y0:0, x1:3000, y1:600};
+  }
+  if(!Number.isFinite(Number(d.building.units)) || Number(d.building.units) < 1) d.building.units = 1;
+
+  // ⭐ 地块：老文件里是 id（walk/curb/road/far），新格式是 kind。两种都认。
+  d.bands.forEach(b=>{
+    if(!b.kind) b.kind = b.id || "lot";
+    delete b.id;
+    if(!BAND_KINDS[b.kind]) b.kind = "lot";
+    if(!b.name) b.name = (BAND_KINDS[b.kind]||{}).cn || "地块";
+    for(const q of ["x0","y0","x1","y1"]) if(!Number.isFinite(b[q])) b[q] = 0;
+    if(b.pitch !== undefined){
+      const p = Number(b.pitch);
+      if(!Number.isFinite(p) || p <= 0) delete b.pitch; else b.pitch = p;
+    }
+  });
+  // 兜底：只在**连车行道都没有**时补一条，别让场景变成没有地面。
+  // ⛔ 这里曾经把 "walk" 也列进兜底，结果「楼前是停车场」的布局（没有前方人行道，合法）
+  //    被强行塞进一条默认人行道，正好压在停车场上。缺 walk 本身不是错。
+  if(!d.bands.some(b=>b.kind==="road")){
+    const def = DEFAULT_BANDS.find(x=>x.kind==="road");
+    d.bands.push(JSON.parse(JSON.stringify(def)));
+  }
+  const wal = d.bands.find(b=>b.kind==="walk"), cur = d.bands.find(b=>b.kind==="curb");
+  d.lamps.forEach(l=>{
+    if(!Number.isFinite(l.x)) l.x = 800;
+    if(!Number.isFinite(l.y)) l.y = (wal ? wal.y1 : 0) - 30;   // ⛔ 别借 SITE：normalize 期间它还指着旧布局
+    if(!Number.isFinite(l.h)) l.h = 450;
+    if(l.side!=="left" && l.side!=="right") l.side = "right";
+  });
+  d.poles.forEach(p=>{ if(!Number.isFinite(p.y)) p.y = (wal?wal.y1:0) - 21; });
+  d.trees.forEach(t=>{ if(!Number.isFinite(t.x)) t.x=0; if(!Number.isFinite(t.y)) t.y=0; });
+  d.cars.forEach(c=>{ if(!Number.isFinite(c.y)) c.y = (cur?cur.y1:0) + 40; if(!Number.isFinite(c.len)) c.len=450;
+                      c.rot = (Number(c.rot) === 90) ? 90 : 0; });
+  d.grass.forEach(g=>{ for(const q of ["x0","y0","x1","y1"]) if(!Number.isFinite(g[q])) g[q]=0; });
+  return d;
+}
+
+(async function boot(){
+  // 启动顺序（只有这一条链，别再加并行的 IIFE —— 会抢 CURRENT_FILE）：
+  //   ① 问服务端有哪些 json  ② 决定读哪个  ③ 渲染下拉  ④ 载入
+  // ⛔ 原来写死 fetch("_layout.json")：换文件名就白屏，还得改代码。
+  const want = new URLSearchParams(location.search).get("layout");
+  let files = [];
+  try{
+    const lr = await fetch("/api/list", {cache:"no-store"});
+    if(lr.ok){
+      files = (await lr.json()).files || [];
+      serverOK = true;
+      if(want && files.includes(want)) CURRENT_FILE = want;
+      else if(!files.includes(CURRENT_FILE) && files.length) CURRENT_FILE = files[0];
+    }
+  }catch(e){ serverOK = false; }
+  setupFilePicker(files);
+
+  if(serverOK){
+    try{
+      const r = await fetch(CURRENT_FILE, {cache:"no-store"});
+      if(r.ok){
+        const d = await r.json();
+        let ok = true;
+        for(const k of ["poles","lamps","trees","grass","cars"]) if(!Array.isArray(d[k])) ok=false;
+        if(ok) L = normalize(d); else toast("文件缺字段，已退回默认布局");
+      }
+    }catch(e){}
+  }
+  // 没有服务时用上次浏览器里的
+  if(!serverOK){
+    try{
+      const s = localStorage.getItem("layout_v1");
+      if(s) L = normalize(JSON.parse(s));
+    }catch(e){}
+    setInterval(()=>localStorage.setItem("layout_v1", JSON.stringify(L)), 3000);
+  }
+  resize();
+  fitTo(contentBox());
+  renderInsp();
+  document.getElementById("save").title = serverOK ? ("写回 " + CURRENT_FILE)
+      : "需要本地服务（问我启动）";
+})();
+</script>
+</body>
+</html>
